@@ -25,6 +25,8 @@ const
   TrapPutSp = 0x24
   TrapHalt = 0x25
 
+proc `+`(a, b: Ptr): Ptr {.borrow.}
+
 proc createVm(): Vm =
   result = create(VmObject)
   result.isHalted = false
@@ -86,7 +88,14 @@ proc run(vm: Vm)=
           ipOffset = signExtend(instr and 0x1FF, 9)
         vm.memory[Ptr(vm.registers[rIp] + ipOffset)] = vm.registers[reg0]
       of opJsr:
-        discard
+        let longFlag = ((instr shr 11) and 1) == 1
+        vm.registers[r7] = vm.registers[rIp]
+        if longFlag:
+          let longIpOffset = signExtend(instr and 0x7FF, 11)
+          vm.registers[rIp] += longIpOffset;
+        else:
+          let reg1 = Register((instr shr 6) and 7)
+          vm.registers[rIp] = vm.registers[reg1]
       of opAnd:
         let 
           dest = Register((instr shr 9) and 7)
@@ -146,23 +155,47 @@ proc run(vm: Vm)=
       of opTrap:
         case instr and 0xFF
         of TrapGetc:
-          discard
+          let c = stdin.readChar()
+          vm.registers[r0] = uint16(c)
         of TrapOut:
-          discard
+          let c = vm.registers[r0]
+          stdout.write(c)
+          stdout.flushFile()
         of TrapPuts:
-          discard
+          var p = Ptr(vm.registers[r0])
+          while vm.memory[p] != 0:
+            stdout.write(char(vm.memory[p]))
+            p = p + Ptr(1)
+          stdout.flushFile()
         of TrapIn:
-          discard
+          stdout.write("Enter a character: ")
+          let c = stdin.readChar()
+          vm.registers[r0] = uint16(c)
         of TrapPutSp:
-          discard
+          var p = Ptr(vm.registers[r0])
+          while vm.memory[p] != 0:
+            let 
+              word = vm.memory[p]
+              c1 = char(word and 0xFF)
+              c2 = char(word shr 8)
+            stdout.write(c1)
+            if c2 != '\0':
+              stdout.write(c2)
+            p = p + Ptr(1)
         of TrapHalt:
-          discard
+          stdout.writeLine("HALT")
+          vm.isHalted = true
         else:
-          discard        
+          stdout.writeLine("Invalid trap: " & $(instr and 0xFF))
+          vm.isHalted = true
       of opRes, opRti:
         discard
-    except ValueError:
-      discard
+    except Exception as e:
+      echo e.msg
+      vm.isHalted = true
+
+proc readImage(vm: Vm, file: File)=
+  discard
 
 proc main()=
   # Load Args
